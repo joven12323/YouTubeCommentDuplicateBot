@@ -158,7 +158,6 @@ async def check_duplicates():
         # Надсилаємо повідомлення про дублі
         for comment_text, count in duplicates:
             video_url = f"https://www.youtube.com/watch?v={video_id}"
-            print(f"Надсилаю повідомлення про дубль: {comment_text}")
             await application.bot.send_message(
                 chat_id=chat_id,
                 text=f"Дубль знайдено\n{video_url}\n\nКоментар: {comment_text}\n(зустрічається {count} разів)"
@@ -185,8 +184,7 @@ scheduler.add_job(check_duplicates, "interval", minutes=2)
 async def main():
     print("Запускаю планувальник...")
     scheduler.start()
-    print("Планувальник запущений, перевіряю його стан...")
-    print(f"Планувальник запущений: {scheduler.running}")
+    print("Планувальник запущений")
     await application.initialize()
     print("Бот ініціалізований")
     await application.start()
