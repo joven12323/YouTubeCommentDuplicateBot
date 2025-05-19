@@ -7,14 +7,20 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telegram import Update
 from telegram.ext import ContextTypes
 
+print("Імпортую бібліотеки...")
+
 # Налаштування
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+print(f"YOUTUBE_API_KEY: {YOUTUBE_API_KEY}")
+print(f"TELEGRAM_TOKEN: {TELEGRAM_TOKEN}")
 
 if not YOUTUBE_API_KEY:
     raise ValueError("YOUTUBE_API_KEY не встановлено")
 if not TELEGRAM_TOKEN:
     raise ValueError("TELEGRAM_TOKEN не встановлено")
+
+print("Змінні середовища перевірені")
 
 # Ініціалізація бази даних
 conn = sqlite3.connect("comments.db", check_same_thread=False)
@@ -34,6 +40,7 @@ cursor.execute("""
     )
 """)
 conn.commit()
+print("База даних ініціалізована")
 
 # Отримання коментарів із YouTube
 def get_video_comments(video_id):
@@ -58,6 +65,7 @@ def get_video_comments(video_id):
 
 # Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("Отримано команду /start")
     await update.message.reply_text(
         "Привіт! Я бот для відстеження дублів коментарів під YouTube-відео.\n"
         "Використовуй /track <video_id>, наприклад: /track ixqPzkuY_4U"
@@ -65,6 +73,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Команда /track
 async def track_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("Отримано команду /track")
     if not context.args:
         await update.message.reply_text("Вкажи ID відео! Наприклад: /track ixqPzkuY_4U")
         return
@@ -84,6 +93,7 @@ async def track_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Команда /list
 async def list_videos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("Отримано команду /list")
     chat_id = str(update.message.chat_id)
     cursor.execute("SELECT video_id FROM videos WHERE chat_id = ?", (chat_id,))
     videos = cursor.fetchall()
@@ -95,6 +105,7 @@ async def list_videos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Команда /untrack
 async def untrack_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("Отримано команду /untrack")
     if not context.args:
         await update.message.reply_text("Вкажи ID відео! Наприклад: /untrack ixqPzkuY_4U")
         return
@@ -147,6 +158,7 @@ async def check_duplicates():
         # Надсилаємо повідомлення про дублі
         for comment_text, count in duplicates:
             video_url = f"https://www.youtube.com/watch?v={video_id}"
+            print(f"Надсилаю повідомлення про дубль: {comment_text}")
             await application.bot.send_message(
                 chat_id=chat_id,
                 text=f"Дубль знайдено\n{video_url}\n\nКоментар: {comment_text}\n(зустрічається {count} разів)"
@@ -157,11 +169,13 @@ async def check_duplicates():
         conn.commit()
 
 # Налаштування бота
+print("Налаштовую бота...")
 application = Application.builder().token(TELEGRAM_TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("track", track_video))
 application.add_handler(CommandHandler("list", list_videos))
 application.add_handler(CommandHandler("untrack", untrack_video))
+print("Обробники команд додані")
 
 # Періодична перевірка (кожні 2 хвилини)
 scheduler = AsyncIOScheduler()
@@ -169,11 +183,16 @@ scheduler.add_job(check_duplicates, "interval", minutes=2)
 
 # Асинхронна функція для запуску
 async def main():
+    print("Запускаю планувальник...")
     scheduler.start()
-    print("Планувальник запущений")
+    print("Планувальник запущений, перевіряю його стан...")
+    print(f"Планувальник запущений: {scheduler.running}")
     await application.initialize()
+    print("Бот ініціалізований")
     await application.start()
+    print("Бот стартував")
     await application.updater.start_polling()
+    print("Polling запущений")
     await asyncio.Event().wait()
 
 # Запуск бота
@@ -181,5 +200,5 @@ if __name__ == "__main__":
     print("Бот запускається...")
     try:
         asyncio.run(main())
-    except KeyboardInterrupt:
-        print("Бот зупинений")
+    except Exception as e:
+        print(f"Помилка при запуску бота: {e}")
