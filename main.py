@@ -35,8 +35,7 @@ cursor.execute("""
     CREATE TABLE IF NOT EXISTS comments (
         video_id TEXT,
         comment_text TEXT,
-        comment_id TEXT,
-        reported INTEGER DEFAULT 0
+        comment_id TEXT
     )
 """)
 conn.commit()
@@ -129,26 +128,25 @@ async def check_duplicates():
     videos = cursor.fetchall()
     print(f"Знайдено {len(videos)} відео для перевірки")
     for video_id, chat_id in videos:
-        # Отримуємо коментарі
+        # Отримуємо коментарі з YouTube
         comments = get_video_comments(video_id)
         if not comments:
             print(f"Немає коментарів для відео {video_id}")
             continue
 
-        # Додаємо нові коментарі до бази
+        # Оновлюємо базу: видаляємо старі коментарі й додаємо нові
+        cursor.execute("DELETE FROM comments WHERE video_id = ?", (video_id,))
         print(f"Додаю {len(comments)} коментарів до бази для відео {video_id}")
         for comment_text, comment_id in comments:
-            cursor.execute("SELECT * FROM comments WHERE comment_id = ?", (comment_id,))
-            if not cursor.fetchone():
-                cursor.execute("INSERT INTO comments (video_id, comment_text, comment_id) VALUES (?, ?, ?)",
-                               (video_id, comment_text, comment_id))
+            cursor.execute("INSERT INTO comments (video_id, comment_text, comment_id) VALUES (?, ?, ?)",
+                           (video_id, comment_text, comment_id))
         conn.commit()
 
         # Шукаємо дублі в межах одного відео
         cursor.execute("""
             SELECT comment_text, COUNT(*) as count
             FROM comments
-            WHERE video_id = ? AND reported = 0
+            WHERE video_id = ?
             GROUP BY comment_text
             HAVING count > 1
         """, (video_id,))
@@ -162,9 +160,6 @@ async def check_duplicates():
                 chat_id=chat_id,
                 text=f"Дубль знайдено\n{video_url}\n\nКоментар: {comment_text}\n(зустрічається {count} разів)"
             )
-            # Помічаємо коментарі як повідомлені
-            cursor.execute("UPDATE comments SET reported = 1 WHERE video_id = ? AND comment_text = ?",
-                           (video_id, comment_text))
         conn.commit()
 
 # Налаштування бота
