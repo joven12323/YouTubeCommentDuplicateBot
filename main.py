@@ -41,26 +41,46 @@ cursor.execute("""
 conn.commit()
 print("База даних ініціалізована")
 
-# Отримання коментарів із YouTube
+# Нормалізація тексту коментаря
+def normalize_text(text):
+    return text.strip().lower()
+
+# Отримання коментарів із YouTube (з пагінацією)
 def get_video_comments(video_id):
     print(f"Отримую коментарі для відео {video_id}...")
-    try:
-        url = f"https://www.googleapis.com/youtube/v3/commentThreads?part=snippet&videoId={video_id}&key={YOUTUBE_API_KEY}&maxResults=100"
-        response = requests.get(url).json()
-        print(f"Відповідь YouTube API: {response}")
-        comments = []
-        if "items" in response:
-            for item in response["items"]:
-                comment = item["snippet"]["topLevelComment"]["snippet"]["textOriginal"]
-                comment_id = item["snippet"]["topLevelComment"]["id"]
-                comments.append((comment, comment_id))
-            print(f"Знайдено {len(comments)} коментарів")
-        else:
-            print("Коментарі відсутні або помилка в структурі відповіді")
-        return comments
-    except Exception as e:
-        print(f"Помилка YouTube API: {e}")
-        return []
+    comments = []
+    next_page_token = None
+
+    while True:
+        try:
+            url = (f"https://www.googleapis.com/youtube/v3/commentThreads?part=snippet&videoId={video_id}"
+                   f"&key={YOUTUBE_API_KEY}&maxResults=100")
+            if next_page_token:
+                url += f"&pageToken={next_page_token}"
+            response = requests.get(url).json()
+            print(f"Відповідь YouTube API: {response}")
+
+            if "items" in response:
+                for item in response["items"]:
+                    comment = item["snippet"]["topLevelComment"]["snippet"]["textOriginal"]
+                    comment_id = item["snippet"]["topLevelComment"]["id"]
+                    comments.append((comment, comment_id))
+                print(f"Знайдено {len(comments)} коментарів на цій сторінці")
+            else:
+                print("Коментарі відсутні або помилка в структурі відповіді")
+                break
+
+            # Перевірка на наступну сторінку
+            next_page_token = response.get("nextPageToken")
+            if not next_page_token:
+                break
+
+        except Exception as e:
+            print(f"Помилка YouTube API: {e}")
+            break
+
+    print(f"Усього знайдено {len(comments)} коментарів")
+    return comments
 
 # Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -137,9 +157,13 @@ async def check_duplicates():
         # Оновлюємо базу: видаляємо старі коментарі й додаємо нові
         cursor.execute("DELETE FROM comments WHERE video_id = ?", (video_id,))
         print(f"Додаю {len(comments)} коментарів до бази для відео {video_id}")
+        normalized_comments = []
         for comment_text, comment_id in comments:
+            normalized_text = normalize_text(comment_text)
+            print(f"Коментар: {comment_text}, Нормалізований: {normalized_text}, ID: {comment_id}")
             cursor.execute("INSERT INTO comments (video_id, comment_text, comment_id) VALUES (?, ?, ?)",
-                           (video_id, comment_text, comment_id))
+                           (video_id, normalized_text, comment_id))
+            normalized_comments.append((normalized_text, comment_id))
         conn.commit()
 
         # Шукаємо дублі в межах одного відео
@@ -154,11 +178,15 @@ async def check_duplicates():
         print(f"Знайдено {len(duplicates)} дублів для відео {video_id}")
 
         # Надсилаємо повідомлення про дублі
+        # Збираємо оригінальні тексти коментарів для відображення
+        original_texts = {normalize_text(text): text for text, _ in comments}
         for comment_text, count in duplicates:
+            original_text = original_texts.get(comment_text, comment_text)
+            print(f"Дубль: {original_text}, Нормалізований: {comment_text}, кількість: {count}")
             video_url = f"https://www.youtube.com/watch?v={video_id}"
             await application.bot.send_message(
                 chat_id=chat_id,
-                text=f"Дубль знайдено\n{video_url}\n\nКоментар: {comment_text}\n(зустрічається {count} разів)"
+                text=f"Дубль знайдено\n{video_url}\n\nКоментар: {original_text}\n(зустрічається {count} разів)"
             )
         conn.commit()
 
