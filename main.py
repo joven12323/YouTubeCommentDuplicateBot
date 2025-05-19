@@ -37,15 +37,20 @@ conn.commit()
 
 # Отримання коментарів із YouTube
 def get_video_comments(video_id):
+    print(f"Отримую коментарі для відео {video_id}...")
     try:
         url = f"https://www.googleapis.com/youtube/v3/commentThreads?part=snippet&videoId={video_id}&key={YOUTUBE_API_KEY}&maxResults=100"
         response = requests.get(url).json()
+        print(f"Відповідь YouTube API: {response}")
         comments = []
         if "items" in response:
             for item in response["items"]:
                 comment = item["snippet"]["topLevelComment"]["snippet"]["textOriginal"]
                 comment_id = item["snippet"]["topLevelComment"]["id"]
                 comments.append((comment, comment_id))
+            print(f"Знайдено {len(comments)} коментарів")
+        else:
+            print("Коментарі відсутні або помилка в структурі відповіді")
         return comments
     except Exception as e:
         print(f"Помилка YouTube API: {e}")
@@ -108,14 +113,19 @@ async def untrack_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Перевірка дублів коментарів
 async def check_duplicates():
+    print("Перевіряю дублі коментарів...")
     cursor.execute("SELECT video_id, chat_id FROM videos")
-    for video_id, chat_id in cursor.fetchall():
+    videos = cursor.fetchall()
+    print(f"Знайдено {len(videos)} відео для перевірки")
+    for video_id, chat_id in videos:
         # Отримуємо коментарі
         comments = get_video_comments(video_id)
         if not comments:
+            print(f"Немає коментарів для відео {video_id}")
             continue
 
         # Додаємо нові коментарі до бази
+        print(f"Додаю {len(comments)} коментарів до бази для відео {video_id}")
         for comment_text, comment_id in comments:
             cursor.execute("SELECT * FROM comments WHERE comment_id = ?", (comment_id,))
             if not cursor.fetchone():
@@ -132,6 +142,7 @@ async def check_duplicates():
             HAVING count > 1
         """, (video_id,))
         duplicates = cursor.fetchall()
+        print(f"Знайдено {len(duplicates)} дублів для відео {video_id}")
 
         # Надсилаємо повідомлення про дублі
         for comment_text, count in duplicates:
@@ -159,6 +170,7 @@ scheduler.add_job(check_duplicates, "interval", minutes=2)
 # Асинхронна функція для запуску
 async def main():
     scheduler.start()
+    print("Планувальник запущений")
     await application.initialize()
     await application.start()
     await application.updater.start_polling()
