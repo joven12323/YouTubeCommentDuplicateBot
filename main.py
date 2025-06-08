@@ -41,11 +41,9 @@ cursor.execute("""
 conn.commit()
 print("База даних ініціалізована")
 
-# Нормалізація тексту коментаря
 def normalize_text(text):
     return text.strip().lower()
 
-# Отримання коментарів із YouTube (з пагінацією)
 def get_video_comments(video_id):
     print(f"Отримую коментарі для відео {video_id}...")
     comments = []
@@ -70,7 +68,6 @@ def get_video_comments(video_id):
                 print("Коментарі відсутні або помилка в структурі відповіді")
                 break
 
-            # Перевірка на наступну сторінку
             next_page_token = response.get("nextPageToken")
             if not next_page_token:
                 break
@@ -82,7 +79,6 @@ def get_video_comments(video_id):
     print(f"Усього знайдено {len(comments)} коментарів")
     return comments
 
-# Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("Отримано команду /start")
     await update.message.reply_text(
@@ -90,7 +86,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Використовуй /track <video_id>, наприклад: /track ixqPzkuY_4U"
     )
 
-# Команда /track
 async def track_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("Отримано команду /track")
     if not context.args:
@@ -99,18 +94,15 @@ async def track_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     video_id = context.args[0]
     chat_id = str(update.message.chat_id)
 
-    # Перевірка, чи відео вже відстежується
     cursor.execute("SELECT * FROM videos WHERE video_id = ? AND chat_id = ?", (video_id, chat_id))
     if cursor.fetchone():
         await update.message.reply_text("Це відео вже відстежується!")
         return
 
-    # Додаємо відео до відстеження
     cursor.execute("INSERT INTO videos (video_id, chat_id) VALUES (?, ?)", (video_id, chat_id))
     conn.commit()
-    await update.message.reply_text(f"Відео {video_id} додано до відстеження! Перевірятиму дублі коментарів кожні 2 хвилини.")
+    await update.message.reply_text(f"Відео {video_id} додано до відстеження! Перевірятиму дублі коментарів кожні 10 хвилин.")
 
-# Команда /list
 async def list_videos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("Отримано команду /list")
     chat_id = str(update.message.chat_id)
@@ -122,7 +114,6 @@ async def list_videos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     video_list = "\n".join([video[0] for video in videos])
     await update.message.reply_text(f"Відстежувані відео:\n{video_list}")
 
-# Команда /untrack
 async def untrack_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("Отримано команду /untrack")
     if not context.args:
@@ -141,20 +132,35 @@ async def untrack_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.commit()
     await update.message.reply_text(f"Відео {video_id} видалено з відстеження.")
 
-# Перевірка дублів коментарів
+async def untrack_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("Отримано команду /untrack_all")
+    chat_id = str(update.message.chat_id)
+
+    cursor.execute("SELECT video_id FROM videos WHERE chat_id = ?", (chat_id,))
+    videos = cursor.fetchall()
+    
+    if not videos:
+        await update.message.reply_text("У вас немає відео для видалення.")
+        return
+
+    video_ids = [video[0] for video in videos]
+    cursor.execute("DELETE FROM videos WHERE chat_id = ?", (chat_id,))
+    cursor.executemany("DELETE FROM comments WHERE video_id = ?", [(vid,) for vid in video_ids])
+    conn.commit()
+    
+    await update.message.reply_text("Усі відео були видалені з відстеження.")
+
 async def check_duplicates():
     print("Перевіряю дублі коментарів...")
     cursor.execute("SELECT video_id, chat_id FROM videos")
     videos = cursor.fetchall()
     print(f"Знайдено {len(videos)} відео для перевірки")
     for video_id, chat_id in videos:
-        # Отримуємо коментарі з YouTube
         comments = get_video_comments(video_id)
         if not comments:
             print(f"Немає коментарів для відео {video_id}")
             continue
 
-        # Оновлюємо базу: видаляємо старі коментарі й додаємо нові
         cursor.execute("DELETE FROM comments WHERE video_id = ?", (video_id,))
         print(f"Додаю {len(comments)} коментарів до бази для відео {video_id}")
         normalized_comments = []
@@ -166,7 +172,6 @@ async def check_duplicates():
             normalized_comments.append((normalized_text, comment_id))
         conn.commit()
 
-        # Шукаємо дублі в межах одного відео
         cursor.execute("""
             SELECT comment_text, COUNT(*) as count
             FROM comments
@@ -177,8 +182,6 @@ async def check_duplicates():
         duplicates = cursor.fetchall()
         print(f"Знайдено {len(duplicates)} дублів для відео {video_id}")
 
-        # Надсилаємо повідомлення про дублі
-        # Збираємо оригінальні тексти коментарів для відображення
         original_texts = {normalize_text(text): text for text, _ in comments}
         for comment_text, count in duplicates:
             original_text = original_texts.get(comment_text, comment_text)
@@ -190,20 +193,19 @@ async def check_duplicates():
             )
         conn.commit()
 
-# Налаштування бота
 print("Налаштовую бота...")
 application = Application.builder().token(TELEGRAM_TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("track", track_video))
 application.add_handler(CommandHandler("list", list_videos))
 application.add_handler(CommandHandler("untrack", untrack_video))
+application.add_handler(CommandHandler("untrack_all", untrack_all))
 print("Обробники команд додані")
 
-# Періодична перевірка (кожні 2 хвилини)
+# Зміна: перевірка кожні 10 хвилин
 scheduler = AsyncIOScheduler()
-scheduler.add_job(check_duplicates, "interval", minutes=2)
+scheduler.add_job(check_duplicates, "interval", minutes=10)
 
-# Асинхронна функція для запуску
 async def main():
     print("Запускаю планувальник...")
     scheduler.start()
@@ -216,7 +218,6 @@ async def main():
     print("Polling запущений")
     await asyncio.Event().wait()
 
-# Запуск бота
 if __name__ == "__main__":
     print("Бот запускається...")
     try:
